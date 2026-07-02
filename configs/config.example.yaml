@@ -4,11 +4,15 @@ raw_data_dir: "E:/华鹏波形数据"
 project_dir: "E:/NILM_Project"
 
 waveform:
-  frame_bytes: 5394
+  nominal_record_bytes: 5394
   header_bytes: 18
-  samples_per_cycle: 896
-  channels: 3
-  dtype: "int16"
+  expected_content_bytes: 5376
+  samples_per_record: 256
+  channels: 7
+  bytes_per_item: 3
+  item_type: "signed_int24"
+  item_byteorder: "little"
+  channel_names: ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic", "I0"]
   grid_frequency_hz: 50
 
 outputs:

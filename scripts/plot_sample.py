@@ -1,7 +1,7 @@
-﻿"""Plot sample cycles from one parsed NILM waveform file.
+﻿"""Plot sample records from one parsed NILM waveform file.
 
 This script intentionally uses Pillow instead of matplotlib so the first visual
-validation step has very few dependencies. It reads a small number of frames via
+validation step has very few dependencies. It reads a small number of records via
 `parse_waveform.py` and writes a PNG with one row per channel.
 """
 
@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from parse_waveform import channel_summary, inspect_waveform_file, parse_waveform_file
+from parse_waveform import DEFAULT_FORMAT, channel_summary, inspect_waveform_file, parse_waveform_file
 
 
 CANVAS_WIDTH = 1600
@@ -46,7 +46,7 @@ def _safe_output_path(input_path: Path, output_dir: Path, start_frame: int, cycl
     hour = input_path.parents[0].name if len(input_path.parents) >= 1 else "unknown_hour"
     stem = f"{category}_{date}_{hour}_{input_path.name}"
     stem = re.sub(r'[<>:\\"/|?*]+', "_", stem)
-    return output_dir / f"{stem}_frame{start_frame}_cycles{cycles}.png"
+    return output_dir / f"{stem}_frame{start_frame}_records{cycles}.png"
 
 
 def _scale_points(values: np.ndarray, x0: int, y0: int, width: int, height: int) -> list[tuple[int, int]]:
@@ -79,7 +79,7 @@ def plot_waveforms(
     output_path: Path,
     *,
     start_frame: int,
-    dpi_note: str = "896 samples/cycle",
+    dpi_note: str = "256 samples/record",
 ) -> Path:
     """Write a PNG showing parsed waveforms in three stacked channel rows."""
 
@@ -100,7 +100,7 @@ def plot_waveforms(
     small_font = _load_font(15)
 
     title = f"Waveform sample: {input_path.name}"
-    subtitle = f"start_frame={start_frame}, cycles={cycles}, shape={tuple(waveforms.shape)}, {dpi_note}"
+    subtitle = f"start_frame={start_frame}, records={cycles}, shape={tuple(waveforms.shape)}, {dpi_note}"
     draw.text((LEFT_MARGIN, 24), title, fill=TEXT, font=title_font)
     draw.text((LEFT_MARGIN, 58), subtitle, fill=(82, 90, 99), font=small_font)
 
@@ -124,10 +124,10 @@ def plot_waveforms(
             draw.line([x0, zero_y, x0 + plot_width, zero_y], fill=(140, 146, 153), width=1)
 
         rms = float(np.sqrt(np.mean(values.astype(np.float64) ** 2)))
-        label = f"CH{channel + 1}  min={int(vmin)}  max={int(vmax)}  rms={rms:.1f}"
+        label = f"{DEFAULT_FORMAT.channel_names[channel]}  min={int(vmin)}  max={int(vmax)}  rms={rms:.1f}"
         draw.text((x0, row_y + 8), label, fill=TEXT, font=label_font)
-        draw.text((18, y0 + plot_height // 2 - 10), f"CH{channel + 1}", fill=color, font=label_font)
-        draw.text((x0, y0 + plot_height + 8), "cycle boundaries", fill=(104, 112, 122), font=small_font)
+        draw.text((18, y0 + plot_height // 2 - 10), DEFAULT_FORMAT.channel_names[channel], fill=color, font=label_font)
+        draw.text((x0, y0 + plot_height + 8), "record boundaries", fill=(104, 112, 122), font=small_font)
         if zero_y is not None:
             draw.text((x0 + plot_width - 45, zero_y - 18), "0", fill=(104, 112, 122), font=small_font)
 
@@ -137,10 +137,10 @@ def plot_waveforms(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot a few parsed cycles from one waveform file.")
+    parser = argparse.ArgumentParser(description="Plot a few parsed records from one waveform file.")
     parser.add_argument("path", type=Path, help="Path to one binary waveform file")
     parser.add_argument("--start-frame", type=int, default=0)
-    parser.add_argument("--cycles", type=int, default=3, help="Number of grid cycles to plot")
+    parser.add_argument("--records", "--cycles", dest="records", type=int, default=3, help="Number of records to plot")
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -150,16 +150,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None, help="Optional explicit output PNG path")
     args = parser.parse_args()
 
-    if args.cycles <= 0:
-        raise ValueError("--cycles must be positive")
+    if args.records <= 0:
+        raise ValueError("--records must be positive")
 
     info = inspect_waveform_file(args.path)
-    waveforms = parse_waveform_file(args.path, start_frame=args.start_frame, max_frames=args.cycles)
-    output_path = args.output or _safe_output_path(args.path, args.output_dir, args.start_frame, args.cycles)
+    waveforms = parse_waveform_file(args.path, start_frame=args.start_frame, max_frames=args.records)
+    output_path = args.output or _safe_output_path(args.path, args.output_dir, args.start_frame, args.records)
     output_path = plot_waveforms(waveforms, args.path, output_path, start_frame=args.start_frame)
 
     print(f"input: {args.path}")
-    print(f"file_frames: {info.frame_count}")
+    print(f"file_records: {info.frame_count}")
     print(f"trailing_bytes: {info.trailing_bytes}")
     print(f"parsed_shape: {tuple(waveforms.shape)}")
     print(f"summary: {channel_summary(waveforms)}")
@@ -168,4 +168,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
