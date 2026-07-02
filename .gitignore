@@ -1,0 +1,60 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Local environment
+.env
+.venv/
+venv/
+config.local.yaml
+configs/config.local.yaml
+
+# Raw waveform data and large binary artifacts
+*.bin
+*.dat
+*.npy
+*.npz
+*.parquet
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.onnx
+*.pt
+*.pth
+*.ckpt
+
+# Generated outputs: keep folder placeholders, ignore generated content
+outputs/**
+!outputs/
+!outputs/.gitkeep
+!outputs/qc/
+!outputs/qc/.gitkeep
+!outputs/sample_plots/
+!outputs/sample_plots/.gitkeep
+!outputs/features/
+!outputs/features/.gitkeep
+
+# Trained models and caches: keep folder placeholder, ignore model files
+models/**
+!models/
+!models/.gitkeep
+
+# Logs and temporary files
+logs/
+tmp/
+temp/
+*.log
+*.tmp
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

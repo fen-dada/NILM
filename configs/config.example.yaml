@@ -1,0 +1,17 @@
+﻿# Example project configuration. Copy this file to config.local.yaml and edit paths for your machine.
+
+raw_data_dir: "E:/华鹏波形数据"
+project_dir: "E:/NILM_Project"
+
+waveform:
+  frame_bytes: 5394
+  header_bytes: 18
+  samples_per_cycle: 896
+  channels: 3
+  dtype: "int16"
+  grid_frequency_hz: 50
+
+outputs:
+  qc_dir: "outputs/qc"
+  sample_plots_dir: "outputs/sample_plots"
+  features_dir: "outputs/features"
