@@ -161,8 +161,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Detect candidate NILM events from minute features.")
     parser.add_argument("--features", type=Path, default=Path("outputs/features/minute_features.csv"))
     parser.add_argument("--output", type=Path, default=Path("outputs/events/candidate_events.csv"))
-    parser.add_argument("--top-n", type=int, default=300, help="Number of highest-scoring candidates to write")
-    parser.add_argument("--min-score", type=float, default=20.0, help="Minimum aggregate robust score")
+    parser.add_argument("--top-n", type=int, default=None, help="Optional cap for highest-scoring candidates")
+    parser.add_argument("--min-score", type=float, default=100.0, help="Minimum aggregate robust score")
     parser.add_argument("--feature", action="append", dest="features_to_use", help="Feature to compare; can be repeated")
     args = parser.parse_args()
 
@@ -176,7 +176,7 @@ def main() -> None:
         if parse_float(row.get("event_score")) >= args.min_score and row.get("triggered_features")
     ]
     candidates.sort(key=lambda row: parse_float(row.get("event_score")), reverse=True)
-    if args.top_n is not None:
+    if args.top_n is not None and args.top_n > 0:
         candidates = candidates[: args.top_n]
 
     write_csv(candidates, args.output)

@@ -11,6 +11,7 @@ __pycache__/
 .env
 .venv/
 venv/
+node_modules/
 config.local.yaml
 configs/config.local.yaml
 

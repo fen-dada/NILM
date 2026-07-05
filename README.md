@@ -1,23 +1,45 @@
 # NILM Industrial Load Identification Project
 
-This folder keeps project code and generated outputs separate from the raw waveform data.
+This repository contains the code and project notes for industrial NILM
+experiments. Raw waveform data and generated outputs are kept outside Git or
+ignored by `.gitignore`.
 
 ## Folders
 
-- `scripts/`: Python scripts for decoding waveform files, quality checks, plotting, and feature extraction.
-- `outputs/qc/`: Quality-control tables and summaries.
-- `outputs/sample_plots/`: Waveform plots used to verify decoding.
-- `outputs/features/`: Extracted cycle-level or minute-level features for modeling.
-- `notebooks/`: Exploratory analysis notebooks.
-- `models/`: Trained model files and evaluation results.
-- `docs/`: Project notes, method summaries, and experiment records.
+- `scripts/`: parsers, QC, feature extraction, event detection, pseudo-labeling,
+  training, prediction, and pipeline scripts.
+- `outputs/`: generated QC reports, features, event tables, labels, plots, and
+  model reports. Generated content is ignored by Git.
+- `models/`: trained model artifacts. Generated model files are ignored by Git.
+- `notebooks/`: exploratory analysis notebooks.
+- `docs/`: method notes, progress records, and experiment summaries.
 
-## First Milestone
+## Current Data Format
 
-Decode the binary waveform files and generate a quality-control report:
+The vendor waveform files are parsed as repeated records with no global file
+header:
 
-- Parse each frame as 5394 bytes.
-- Treat the first 18 bytes as frame header.
-- Treat the remaining 5376 bytes as `896 samples x 3 channels x int16`.
-- Plot sample waveforms from each measurement point.
-- Scan all files for missing data, abnormal frame counts, clipping, and channel statistics.
+- record header: 18 bytes
+  - `seq`: 4-byte unsigned int, little-endian
+  - `data_len`: 4-byte unsigned int, little-endian
+  - `timestamp`: 10 bytes
+- content: `data_len` bytes
+  - currently expected as 5376 bytes
+  - `256 groups x 7 channels x 3 bytes`
+  - channel order: `Ua, Ub, Uc, Ia, Ib, Ic, I0`
+  - channel values are decoded as signed little-endian int24
+
+## Current Workflow
+
+The current end-to-end prototype is:
+
+1. Parse raw binary waveform files.
+2. Run QC checks.
+3. Extract minute-level voltage/current/harmonic/power-like features.
+4. Detect candidate load events from adjacent-minute feature changes.
+5. Generate rule-based pseudo labels when no external operation log exists.
+6. Train a first-pass event classifier.
+7. Predict event type for candidate events.
+
+Use `scripts/run_pipeline.py` as the high-level entry point for future
+experiments from raw binary data.
