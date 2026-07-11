@@ -1,12 +1,11 @@
 """Run the NILM workflow from raw binary waveform files.
 
-Typical inference flow:
+Current flow:
 1. raw binary files -> minute features
-2. minute features -> candidate events
-3. candidate events -> model predictions
-
-Optional bootstrap flow can also create rule-based pseudo labels and retrain the
-baseline classifier when no external operation log is available.
+2. minute features -> event detection
+3. candidate events -> phase-aligned steady waveform differences
+4. submeter waveform events -> random forest with chronological holdout
+5. main-meter waveform events -> startup/stop and submeter attribution
 """
 
 from __future__ import annotations
@@ -26,23 +25,21 @@ def run_step(command: list[str], *, dry_run: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run end-to-end NILM pipeline from raw binary data.")
-    parser.add_argument("--raw-data-dir", type=Path, default=Path(r"E:/华鹏波形数据"))
+    parser.add_argument("--raw-data-dir", type=Path, default=Path("E:/\u534e\u9e4f\u6ce2\u5f62\u6570\u636e"))
     parser.add_argument("--features", type=Path, default=Path("outputs/features/minute_features.csv"))
     parser.add_argument("--events", type=Path, default=Path("outputs/events/candidate_events.csv"))
-    parser.add_argument("--labels", type=Path, default=Path("outputs/labels/auto_event_labels.csv"))
-    parser.add_argument("--model", type=Path, default=Path("models/event_classifier_rf.json"))
-    parser.add_argument("--predictions", type=Path, default=Path("outputs/predictions/event_predictions.csv"))
-    parser.add_argument("--model-report-dir", type=Path, default=Path("outputs/model_reports/event_classifier"))
+    parser.add_argument("--model", type=Path, default=Path("models/steady_waveform_rf.json"))
+    parser.add_argument("--model-report-dir", type=Path, default=Path("outputs/model_reports/steady_waveform_rf"))
     parser.add_argument("--project-dir", type=Path, default=Path(r"E:/NILM_Project"))
-    parser.add_argument("--top-n", type=int, default=300)
-    parser.add_argument("--min-score", type=float, default=20.0)
+    parser.add_argument("--top-n", type=int, default=None)
+    parser.add_argument("--min-score", type=float, default=100.0)
+    parser.add_argument("--target-min-score", type=float, default=5.0)
+    parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--max-fft-records", type=int, default=200)
     parser.add_argument("--limit", type=int, default=None, help="Limit raw files for a quick smoke test")
     parser.add_argument("--skip-feature-extraction", action="store_true")
     parser.add_argument("--skip-event-detection", action="store_true")
-    parser.add_argument("--make-pseudo-labels", action="store_true")
     parser.add_argument("--train", action="store_true")
-    parser.add_argument("--predict", action="store_true", help="Run prediction using an existing or newly trained model")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -64,65 +61,39 @@ def main() -> None:
         run_step(command, dry_run=args.dry_run)
 
     if not args.skip_event_detection:
-        run_step(
-            [
+        command = [
                 python,
                 "scripts/detect_events.py",
                 "--features",
                 str(args.features),
                 "--output",
                 str(args.events),
-                "--top-n",
-                str(args.top_n),
                 "--min-score",
                 str(args.min_score),
-            ],
-            dry_run=args.dry_run,
-        )
-
-    if args.make_pseudo_labels or args.train:
-        run_step(
-            [
-                python,
-                "scripts/auto_label_events.py",
-                "--events",
-                str(args.events),
-                "--output",
-                str(args.labels),
-                "--project-dir",
-                str(args.project_dir),
-            ],
-            dry_run=args.dry_run,
-        )
+            ]
+        if args.top_n is not None:
+            command.extend(["--top-n", str(args.top_n)])
+        run_step(command, dry_run=args.dry_run)
 
     if args.train:
         run_step(
             [
                 python,
-                "scripts/train_event_classifier.py",
-                "--events",
-                str(args.events),
-                "--labels",
-                str(args.labels),
-                "--output-dir",
+                "scripts/train_steady_waveform_rf.py",
+                "--raw-data-dir",
+                str(args.raw_data_dir),
+                "--features",
+                str(args.features),
+                "--train-min-score",
+                str(args.min_score),
+                "--target-min-score",
+                str(args.target_min_score),
+                "--train-ratio",
+                str(args.train_ratio),
+                "--report-dir",
                 str(args.model_report_dir),
                 "--model-output",
                 str(args.model),
-            ],
-            dry_run=args.dry_run,
-        )
-
-    if args.predict or args.train:
-        run_step(
-            [
-                python,
-                "scripts/predict_event_classifier.py",
-                "--events",
-                str(args.events),
-                "--model",
-                str(args.model),
-                "--output",
-                str(args.predictions),
             ],
             dry_run=args.dry_run,
         )

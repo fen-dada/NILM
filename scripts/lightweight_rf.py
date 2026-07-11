@@ -1,49 +1,16 @@
-"""Train a first-pass event classifier from rule-based pseudo labels.
-
-The project currently has no external equipment operation log, so labels are
-pseudo labels generated from voltage/current features. This model is therefore a
-baseline for workflow validation, not a ground-truth equipment recognizer.
-
-The implementation includes a small random forest classifier to avoid adding a
-heavy dependency before the project environment is finalized.
-"""
+"""Small random forest utilities used by NILM prototype scripts."""
 
 from __future__ import annotations
 
-import argparse
 import csv
-import json
 import math
 import random
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-
-METADATA_COLUMNS = {
-    "category",
-    "timestamp",
-    "relative_path",
-    "previous_relative_path",
-    "triggered_features",
-}
-
-
-def parse_float(value: object) -> float:
-    try:
-        if value is None or value == "":
-            return math.nan
-        return float(value)
-    except (TypeError, ValueError):
-        return math.nan
-
-
-def load_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", newline="", encoding="utf-8-sig") as file_obj:
-        return list(csv.DictReader(file_obj))
 
 
 def write_csv(rows: list[dict[str, Any]], output: Path) -> None:
@@ -57,53 +24,11 @@ def write_csv(rows: list[dict[str, Any]], output: Path) -> None:
         writer.writerows(rows)
 
 
-def is_numeric_column(rows: list[dict[str, str]], column: str) -> bool:
-    if column in METADATA_COLUMNS:
-        return False
-    seen = False
-    for row in rows:
-        value = row.get(column, "")
-        if value == "":
-            continue
-        seen = True
-        if not math.isfinite(parse_float(value)):
-            return False
-    return seen
-
-
-def build_dataset(
-    events: list[dict[str, str]], labels: list[dict[str, str]], include_uncertain: bool
-) -> tuple[np.ndarray, np.ndarray, list[str], list[dict[str, str]]]:
-    label_by_path = {row["事件后文件"]: row for row in labels}
-    feature_names = [name for name in events[0].keys() if is_numeric_column(events, name)]
-    dataset_rows: list[dict[str, str]] = []
-    x_values: list[list[float]] = []
-    y_values: list[str] = []
-
-    for event in events:
-        label_row = label_by_path.get(event["relative_path"])
-        if not label_row:
-            continue
-        label = label_row.get("自动判断", "")
-        if not label or (label == "不确定" and not include_uncertain):
-            continue
-        values = [parse_float(event.get(name)) for name in feature_names]
-        if not all(math.isfinite(value) for value in values):
-            continue
-        merged = dict(event)
-        merged["label"] = label
-        dataset_rows.append(merged)
-        x_values.append(values)
-        y_values.append(label)
-
-    return np.asarray(x_values, dtype=np.float64), np.asarray(y_values, dtype=object), feature_names, dataset_rows
-
-
-def time_split(rows: list[dict[str, str]], train_ratio: float) -> tuple[np.ndarray, np.ndarray]:
-    indices = list(range(len(rows)))
-    indices.sort(key=lambda index: (rows[index].get("timestamp", ""), rows[index].get("relative_path", "")))
-    split_at = max(1, min(len(indices) - 1, int(round(len(indices) * train_ratio))))
-    return np.asarray(indices[:split_at], dtype=int), np.asarray(indices[split_at:], dtype=int)
+def standardize_train_test(x_train: np.ndarray, x_test: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    mean = np.mean(x_train, axis=0)
+    std = np.std(x_train, axis=0)
+    std[std == 0] = 1.0
+    return (x_train - mean) / std, (x_test - mean) / std, mean, std
 
 
 def gini(labels: np.ndarray) -> float:
@@ -148,7 +73,7 @@ class DecisionTree:
         self.root: TreeNode | None = None
         self.importances: np.ndarray | None = None
 
-    def fit(self, x: np.ndarray, y: np.ndarray, n_classes: int) -> None:
+    def fit(self, x: np.ndarray, y: np.ndarray) -> None:
         self.importances = np.zeros(x.shape[1], dtype=np.float64)
         self.root = self._build(x, y, depth=0)
         total = float(np.sum(self.importances))
@@ -281,7 +206,7 @@ class RandomForest:
                 max_thresholds=self.max_thresholds,
                 rng=random.Random(rng.randrange(1_000_000_000)),
             )
-            tree.fit(x[sample_indices], y[sample_indices], len(self.class_names))
+            tree.fit(x[sample_indices], y[sample_indices])
             self.trees.append(tree)
             if tree.importances is not None:
                 importances += tree.importances
@@ -298,10 +223,6 @@ class RandomForest:
                 probs[index] += tree.predict_proba_one(row, self.class_names)
         return probs / len(self.trees)
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        probs = self.predict_proba(x)
-        return np.asarray([self.class_names[int(np.argmax(row))] for row in probs], dtype=object)
-
     def to_dict(self, feature_names: list[str]) -> dict[str, Any]:
         return {
             "model_type": "lightweight_random_forest",
@@ -316,13 +237,6 @@ class RandomForest:
         }
 
 
-def standardize_train_test(x_train: np.ndarray, x_test: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    mean = np.mean(x_train, axis=0)
-    std = np.std(x_train, axis=0)
-    std[std == 0] = 1.0
-    return (x_train - mean) / std, (x_test - mean) / std, mean, std
-
-
 def classification_rows(y_true: np.ndarray, y_pred: np.ndarray, labels: list[str]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for label in labels:
@@ -335,11 +249,11 @@ def classification_rows(y_true: np.ndarray, y_pred: np.ndarray, labels: list[str
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
         rows.append(
             {
-                "label": label,
-                "precision": round(precision, 6),
-                "recall": round(recall, 6),
-                "f1": round(f1, 6),
-                "support": support,
+                "类别": label,
+                "精确率": round(precision, 6),
+                "召回率": round(recall, 6),
+                "F1": round(f1, 6),
+                "样本数": support,
             }
         )
     return rows
@@ -348,110 +262,8 @@ def classification_rows(y_true: np.ndarray, y_pred: np.ndarray, labels: list[str
 def confusion_rows(y_true: np.ndarray, y_pred: np.ndarray, labels: list[str]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for actual in labels:
-        row: dict[str, object] = {"actual": actual}
+        row: dict[str, object] = {"真实类别": actual}
         for predicted in labels:
-            row[f"pred_{predicted}"] = int(np.sum((y_true == actual) & (y_pred == predicted)))
+            row[f"预测为_{predicted}"] = int(np.sum((y_true == actual) & (y_pred == predicted)))
         rows.append(row)
     return rows
-
-
-def prediction_rows(rows: list[dict[str, str]], y_true: np.ndarray, y_pred: np.ndarray, probs: np.ndarray, labels: list[str]) -> list[dict[str, object]]:
-    output: list[dict[str, object]] = []
-    for row, actual, predicted, prob_row in zip(rows, y_true, y_pred, probs):
-        result: dict[str, object] = {
-            "timestamp": row.get("timestamp", ""),
-            "category": row.get("category", ""),
-            "relative_path": row.get("relative_path", ""),
-            "actual": actual,
-            "predicted": predicted,
-            "correct": actual == predicted,
-            "confidence": round(float(np.max(prob_row)), 6),
-        }
-        for label, value in zip(labels, prob_row):
-            result[f"prob_{label}"] = round(float(value), 6)
-        output.append(result)
-    return output
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Train first-pass NILM event classifier.")
-    parser.add_argument("--events", type=Path, default=Path("outputs/events/candidate_events.csv"))
-    parser.add_argument("--labels", type=Path, default=Path("outputs/labels/auto_event_labels.csv"))
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/model_reports/event_classifier"))
-    parser.add_argument("--model-output", type=Path, default=Path("models/event_classifier_rf.json"))
-    parser.add_argument("--train-ratio", type=float, default=0.7)
-    parser.add_argument("--include-uncertain", action="store_true")
-    parser.add_argument("--n-estimators", type=int, default=120)
-    parser.add_argument("--max-depth", type=int, default=6)
-    parser.add_argument("--min-samples-leaf", type=int, default=3)
-    parser.add_argument("--max-thresholds", type=int, default=24)
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
-
-    events = load_csv(args.events)
-    labels = load_csv(args.labels)
-    x, y, feature_names, dataset_rows = build_dataset(events, labels, args.include_uncertain)
-    train_idx, test_idx = time_split(dataset_rows, args.train_ratio)
-
-    x_train, x_test, mean, std = standardize_train_test(x[train_idx], x[test_idx])
-    y_train = y[train_idx]
-    y_test = y[test_idx]
-
-    model = RandomForest(
-        n_estimators=args.n_estimators,
-        max_depth=args.max_depth,
-        min_samples_leaf=args.min_samples_leaf,
-        max_thresholds=args.max_thresholds,
-        seed=args.seed,
-    )
-    model.fit(x_train, y_train)
-    y_pred = model.predict(x_test)
-    probs = model.predict_proba(x_test)
-    class_names = model.class_names
-    accuracy = float(np.mean(y_pred == y_test)) if y_test.size else math.nan
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    args.model_output.parent.mkdir(parents=True, exist_ok=True)
-
-    report = {
-        "note": "Pseudo-label model. Labels are generated from voltage/current rules, not external operation logs.",
-        "event_rows": len(dataset_rows),
-        "train_rows": int(train_idx.size),
-        "test_rows": int(test_idx.size),
-        "train_ratio": args.train_ratio,
-        "include_uncertain": args.include_uncertain,
-        "classes": class_names,
-        "train_class_counts": dict(Counter(y_train.tolist())),
-        "test_class_counts": dict(Counter(y_test.tolist())),
-        "accuracy": round(accuracy, 6),
-        "feature_count": len(feature_names),
-    }
-    (args.output_dir / "metrics.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_csv(classification_rows(y_test, y_pred, class_names), args.output_dir / "classification_report.csv")
-    write_csv(confusion_rows(y_test, y_pred, class_names), args.output_dir / "confusion_matrix.csv")
-    write_csv(
-        prediction_rows([dataset_rows[index] for index in test_idx], y_test, y_pred, probs, class_names),
-        args.output_dir / "test_predictions.csv",
-    )
-
-    importances = model.feature_importances_ if model.feature_importances_ is not None else np.zeros(len(feature_names))
-    importance_rows = [
-        {"feature": feature, "importance": round(float(value), 8)}
-        for feature, value in sorted(zip(feature_names, importances), key=lambda item: item[1], reverse=True)
-    ]
-    write_csv(importance_rows, args.output_dir / "feature_importance.csv")
-
-    model_payload = model.to_dict(feature_names)
-    model_payload["standardization"] = {
-        "mean": [float(value) for value in mean],
-        "std": [float(value) for value in std],
-    }
-    args.model_output.write_text(json.dumps(model_payload, ensure_ascii=False), encoding="utf-8")
-
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    print(f"wrote reports to {args.output_dir}")
-    print(f"wrote model to {args.model_output}")
-
-
-if __name__ == "__main__":
-    main()
